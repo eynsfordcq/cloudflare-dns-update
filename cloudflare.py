@@ -89,6 +89,27 @@ def update_dns_record(record, ip):
     except Exception as e:
         logging.error(f"update_dns_record(): {e}")
 
+def should_update_record(record_name):
+    # added debug logging
+    logging.debug(f"Checking if record '{record_name}' should be updated")
+    logging.debug(f"ALLOW_LIST: {config.allow_list}")
+    logging.debug(f"DENY_LIST: {config.deny_list}")
+    
+    # first check if record is in DENY_LIST
+    if record_name in config.deny_list:
+        logging.debug(f"Record '{record_name}' is in DENY_LIST, skipping update")
+        return False
+    
+    # if ALLOW_LIST is not empty, only update records in ALLOW_LIST
+    if config.allow_list:
+        is_allowed = record_name in config.allow_list
+        logging.debug(f"ALLOW_LIST is not empty, record '{record_name}' allowed status: {is_allowed}")
+        return is_allowed
+    
+    # if both lists are empty or only DENY_LIST has entries (and record is not in it)
+    logging.debug(f"Record '{record_name}' will be updated (not in DENY_LIST and ALLOW_LIST is empty)")
+    return True
+
 if __name__ == '__main__':
     # args  
     parser = argparse.ArgumentParser()
@@ -97,6 +118,22 @@ if __name__ == '__main__':
 
     # logger 
     setup_logger(config.log_path, config.log_level)
+
+    # output current configuration information
+    logging.info(f"Starting Cloudflare DNS updater")
+    if config.allow_list:
+        logging.info(f"ALLOW_LIST enabled: {', '.join(config.allow_list)}")
+    else:
+        logging.info("ALLOW_LIST is empty - all records are potentially updateable")
+    
+    if config.deny_list:
+        logging.info(f"DENY_LIST enabled: {', '.join(config.deny_list)}")
+    else:
+        logging.info("DENY_LIST is empty - no records are explicitly denied")
+    
+    # check if the environment variables are loaded correctly
+    logging.debug(f"Raw ALLOW_LIST env value: '{os.getenv('ALLOW_LIST', '')}'")
+    logging.debug(f"Raw DENY_LIST env value: '{os.getenv('DENY_LIST', '')}'")
 
     # get ip 
     ip = get_public_ip()
@@ -107,11 +144,16 @@ if __name__ == '__main__':
     logging.debug(f"get_dns_records: {records}")
 
     for record in records:
+        record_name = record.get("name")
+        
+        # skip records not in the specified list
+        if not should_update_record(record_name):
+            logging.info(f"Skipping {record_name} as it's not allowed to be updated")
+            continue
+            
         # skip if ip is not changed
         if ip == record.get("content") and not args.force:
-            logging.info(f"ip is not changed, skipping {record['name']}")
+            logging.info(f"ip is not changed, skipping {record_name}")
             continue 
         
         update_dns_record(record, ip)
-
-
